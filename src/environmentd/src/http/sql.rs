@@ -1120,6 +1120,8 @@ impl ResultSender for WebSocket {
     }
 }
 
+// TODO: Implement for profile dataflow
+
 async fn await_rows<S, F, R>(sender: &mut S, client: &mut SessionClient, f: F) -> Result<R, Error>
 where
     S: ResultSender,

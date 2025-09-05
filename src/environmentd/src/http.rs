@@ -86,6 +86,7 @@ use crate::http::sql::SqlError;
 
 mod catalog;
 mod console;
+mod dataflow_profiler;
 mod memory;
 mod metrics;
 mod probe;
@@ -93,6 +94,8 @@ mod prometheus;
 mod root;
 mod sql;
 mod webhook;
+
+use dataflow_profiler::handle_dataflow_profile;
 
 pub use metrics::Metrics;
 pub use sql::{SqlResponse, WebSocketAuth, WebSocketResponse};
@@ -202,6 +205,7 @@ impl HttpServer {
                     }),
                 )
                 .route("/api/sql", routing::post(sql::handle_sql))
+                .route("/dataflow-profile", routing::post(handle_dataflow_profile))
                 .route("/memory", routing::get(memory::handle_memory))
                 .route(
                     "/hierarchical-memory",
