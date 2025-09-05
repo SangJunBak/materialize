@@ -6288,6 +6288,7 @@ dependencies = [
  "anyhow",
  "askama",
  "assert_cmd",
+ "async-stream",
  "async-trait",
  "axum",
  "axum-extra",

@@ -5,16 +5,17 @@ use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
 use anyhow::bail;
-// use async_stream::try_stream;
+use async_stream::try_stream;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
+use mz_pgrepr::Value;
 // use sqlx::Row;
 // use sqlx::postgres::{PgConnection, PgRow};
 // use sqlx::types::Decimal;
 
-// use crate::types::{Address, OpInfo};
+use super::types::{Address, OpInfo};
 
-// use super::{Batch, Data, Update};
+use super::collect::{Batch, Data, Update};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -22,243 +23,263 @@ pub enum Mode {
     Continual { duration: Option<Duration> },
 }
 
-// pub(super) struct Subscribe {
-//     stream: Option<BoxStream<'static, sqlx::Result<PgRow>>>,
-//     spec: Box<dyn Spec>,
-//     mode: Mode,
-//     stash: Vec<Update>,
-//     up_to: Option<Duration>,
-// }
+// pub struct
+type PgRow = Vec<Option<Value>>;
 
-// impl Subscribe {
-//     pub fn start(mut conn: PgConnection, spec: impl Spec, mode: Mode) -> Self {
-//         let query = spec.subscribe_query(mode);
-//         let stream = try_stream! {
-//             let mut fetch = sqlx::query(&query).fetch(&mut conn);
-//             while let Some(row) = fetch.try_next().await? {
-//                 yield row;
-//             }
-//         }
-//         .boxed();
+pub(super) struct Subscribe {
+    stream: Option<BoxStream<'static, sqlx::Result<PgRow>>>,
+    spec: Box<dyn Spec>,
+    mode: Mode,
+    stash: Vec<Update>,
+    up_to: Option<Duration>,
+}
 
-//         Self {
-//             stream: Some(stream),
-//             spec: Box::new(spec),
-//             mode,
-//             stash: Vec::new(),
-//             up_to: None,
-//         }
-//     }
+impl Subscribe {
+    pub fn start(mut conn: PgConnection, spec: impl Spec, mode: Mode) -> Self {
+        let query = spec.subscribe_query(mode);
+        let stream = try_stream! {
+            let mut fetch = sqlx::query(&query).fetch(&mut conn);
+            while let Some(row) = fetch.try_next().await? {
+                yield row;
+            }
+        }
+        .boxed();
 
-//     fn absorb_row(&mut self, row: &PgRow) -> anyhow::Result<Option<Batch>> {
-//         let progress: bool = row.get("mz_progressed");
-//         let time = get_mz_timestamp(row)?;
+        Self {
+            stream: Some(stream),
+            spec: Box::new(spec),
+            mode,
+            stash: Vec::new(),
+            up_to: None,
+        }
+    }
 
-//         // The first row communicates the as-of time.
-//         let Some(up_to) = self.up_to else {
-//             if !progress {
-//                 bail!("expected initial progress update, got: {row:?}");
-//             }
+    fn absorb_row(&mut self, row: &PgRow) -> anyhow::Result<Option<Batch>> {
+        let progress = match &row[0] {
+            Some(Value::Bool(b)) => *b,
+            _ => bail!("expected boolean progress indicator, got: {:?}", row[0]),
+        };
+        let time = get_mz_timestamp(row)?;
 
-//             let up_to = match self.mode {
-//                 Mode::Snapshot => time,
-//                 Mode::Continual { duration: Some(d) } => time + d,
-//                 Mode::Continual { duration: None } => Duration::MAX,
-//             };
-//             self.up_to = Some(up_to);
-//             return Ok(None);
-//         };
+        // The first row communicates the as-of time.
+        let Some(up_to) = self.up_to else {
+            if !progress {
+                bail!("expected initial progress update, got: {row:?}");
+            }
 
-//         if progress {
-//             if time > up_to {
-//                 self.stream = None;
-//             }
+            let up_to = match self.mode {
+                Mode::Snapshot => time,
+                Mode::Continual { duration: Some(d) } => time + d,
+                Mode::Continual { duration: None } => Duration::MAX,
+            };
+            self.up_to = Some(up_to);
+            return Ok(None);
+        };
 
-//             Ok(Some(Batch {
-//                 time,
-//                 updates: mem::take(&mut self.stash),
-//             }))
-//         } else {
-//             if time <= up_to {
-//                 let update = self.spec.parse_update(row)?;
-//                 self.stash.push(update);
-//             }
+        if progress {
+            if time > up_to {
+                self.stream = None;
+            }
 
-//             Ok(None)
-//         }
-//     }
-// }
+            Ok(Some(Batch {
+                time,
+                updates: mem::take(&mut self.stash),
+            }))
+        } else {
+            if time <= up_to {
+                let update = self.spec.parse_update(row)?;
+                self.stash.push(update);
+            }
 
-// impl Stream for Subscribe {
-//     type Item = anyhow::Result<Batch>;
+            Ok(None)
+        }
+    }
+}
 
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         loop {
-//             let Some(stream) = self.stream.as_mut() else {
-//                 return Poll::Ready(None);
-//             };
+impl Stream for Subscribe {
+    type Item = anyhow::Result<Batch>;
 
-//             let result = ready!(stream.poll_next_unpin(cx));
-//             let result = match result {
-//                 Some(Ok(row)) => self.absorb_row(&row),
-//                 Some(Err(error)) => Err(error.into()),
-//                 None => return Poll::Ready(None),
-//             };
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            let Some(stream) = self.stream.as_mut() else {
+                return Poll::Ready(None);
+            };
 
-//             match result {
-//                 Ok(Some(batch)) => break Poll::Ready(Some(Ok(batch))),
-//                 Ok(None) => {}
-//                 Err(error) => break Poll::Ready(Some(Err(error))),
-//             }
-//         }
-//     }
-// }
+            let result = ready!(stream.poll_next_unpin(cx));
+            let result = match result {
+                Some(Ok(row)) => self.absorb_row(&row),
+                Some(Err(error)) => Err(error.into()),
+                None => return Poll::Ready(None),
+            };
 
-// fn get_mz_timestamp(row: &PgRow) -> anyhow::Result<Duration> {
-//     let ts: Decimal = row.get("mz_timestamp");
-//     let ms: u64 = ts.try_into()?;
-//     Ok(Duration::from_millis(ms))
-// }
+            match result {
+                Ok(Some(batch)) => break Poll::Ready(Some(Ok(batch))),
+                Ok(None) => {}
+                Err(error) => break Poll::Ready(Some(Err(error))),
+            }
+        }
+    }
+}
 
-// pub trait Spec: Any + Send + 'static {
-//     fn query(&self) -> String;
-//     fn parse(&self, row: &PgRow) -> anyhow::Result<Data>;
+fn get_mz_diff(row: &PgRow) -> anyhow::Result<i64> {
+    let diff = row.get("mz_diff");
+    let diff: i64 = diff.unwrap_or(0);
+    Ok(diff)
+}
 
-//     fn parse_update(&self, row: &PgRow) -> anyhow::Result<Update> {
-//         let data = self.parse(row)?;
-//         let time = get_mz_timestamp(row)?;
-//         let diff = row.get("mz_diff");
+fn get_mz_progressed(row: &PgRow) -> Option<bool> {
+    match &row[1] {
+        Some(Value::Bool(b)) => Some(*b),
+        _ => None,
+    }
+}
 
-//         Ok(Update { data, time, diff })
-//     }
+fn get_mz_timestamp(row: &PgRow) -> anyhow::Result<Duration> {
+    match &row[0] {
+        Some(Value::Numeric(d)) => Some(d.0),
+        _ => None,
+    }
+}
 
-//     fn subscribe_query(&self, _mode: Mode) -> String {
-//         format!("SUBSCRIBE ({}) WITH (PROGRESS)", self.query())
-//     }
-// }
+pub trait Spec: Any + Send + 'static {
+    fn query(&self) -> String;
+    fn parse(&self, row: &PgRow) -> anyhow::Result<Data>;
 
-// pub struct Operator;
+    fn parse_update(&self, row: &PgRow) -> anyhow::Result<Update> {
+        let data = self.parse(row)?;
+        let time = get_mz_timestamp(row)?;
+        let diff = row.get("mz_diff");
 
-// impl Spec for Operator {
-//     fn query(&self) -> String {
-//         "
-//         SELECT id::int8, name, address::text
-//         FROM mz_introspection.mz_dataflow_operators
-//         JOIN mz_introspection.mz_dataflow_addresses USING (id)
-//         "
-//         .into()
-//     }
+        Ok(Update { data, time, diff })
+    }
 
-//     fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
-//         let id = row.get::<i64, _>("id").try_into()?;
-//         let name = row.get("name");
-//         let address: &str = row.get("address");
+    fn subscribe_query(&self, _mode: Mode) -> String {
+        format!("SUBSCRIBE ({}) WITH (PROGRESS)", self.query())
+    }
+}
 
-//         let indexes = address
-//             .trim_start_matches('{')
-//             .trim_end_matches('}')
-//             .split(',')
-//             .map(str::parse)
-//             .collect::<Result<Vec<_>, _>>()?
-//             .into_boxed_slice();
+pub struct Operator;
 
-//         let info = OpInfo {
-//             name,
-//             address: Address(indexes),
-//         };
-//         Ok(Data::Operator(id, info))
-//     }
-// }
+impl Spec for Operator {
+    fn query(&self) -> String {
+        "
+        SELECT id::int8, name, address::text
+        FROM mz_introspection.mz_dataflow_operators
+        JOIN mz_introspection.mz_dataflow_addresses USING (id)
+        "
+        .into()
+    }
 
-// pub struct Elapsed;
+    fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
+        let id = row.get::<i64, _>("id").try_into()?;
+        let name = row.get("name");
+        let address: &str = row.get("address");
 
-// impl Spec for Elapsed {
-//     fn query(&self) -> String {
-//         "
-//         SELECT id::int8, worker_id::int8
-//         FROM mz_introspection.mz_scheduling_elapsed_raw
-//         "
-//         .into()
-//     }
+        let indexes = address
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .split(',')
+            .map(str::parse)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_boxed_slice();
 
-//     fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
-//         let id = row.get::<i64, _>("id").try_into()?;
-//         let worker_id = row.get::<i64, _>("worker_id").try_into()?;
-//         Ok(Data::Elapsed(id, worker_id))
-//     }
+        let info = OpInfo {
+            name,
+            address: Address(indexes),
+        };
+        Ok(Data::Operator(id, info))
+    }
+}
 
-//     fn subscribe_query(&self, mode: Mode) -> String {
-//         let snapshot = match mode {
-//             Mode::Snapshot => "true",
-//             Mode::Continual { .. } => "false",
-//         };
+pub struct Elapsed;
 
-//         format!(
-//             "SUBSCRIBE ({}) WITH (PROGRESS, SNAPSHOT = {snapshot})",
-//             self.query(),
-//         )
-//     }
-// }
+impl Spec for Elapsed {
+    fn query(&self) -> String {
+        "
+        SELECT id::int8, worker_id::int8
+        FROM mz_introspection.mz_scheduling_elapsed_raw
+        "
+        .into()
+    }
 
-// pub struct Size;
+    fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
+        let id = row.get::<i64, _>("id").try_into()?;
+        let worker_id = row.get::<i64, _>("worker_id").try_into()?;
+        Ok(Data::Elapsed(id, worker_id))
+    }
 
-// impl Spec for Size {
-//     fn query(&self) -> String {
-//         "
-//         SELECT operator_id::int8, worker_id::int8
-//         FROM mz_introspection.mz_arrangement_heap_size_raw
-//         UNION ALL
-//         SELECT operator_id::int8, worker_id::int8
-//         FROM mz_introspection.mz_arrangement_batcher_size_raw
-//         "
-//         .into()
-//     }
+    fn subscribe_query(&self, mode: Mode) -> String {
+        let snapshot = match mode {
+            Mode::Snapshot => "true",
+            Mode::Continual { .. } => "false",
+        };
 
-//     fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
-//         let id = row.get::<i64, _>("operator_id").try_into()?;
-//         let worker_id = row.get::<i64, _>("worker_id").try_into()?;
-//         Ok(Data::Size(id, worker_id))
-//     }
-// }
+        format!(
+            "SUBSCRIBE ({}) WITH (PROGRESS, SNAPSHOT = {snapshot})",
+            self.query(),
+        )
+    }
+}
 
-// pub struct Capacity;
+pub struct Size;
 
-// impl Spec for Capacity {
-//     fn query(&self) -> String {
-//         "
-//         SELECT operator_id::int8, worker_id::int8
-//         FROM mz_introspection.mz_arrangement_heap_capacity_raw
-//         UNION ALL
-//         SELECT operator_id::int8, worker_id::int8
-//         FROM mz_introspection.mz_arrangement_batcher_capacity_raw
-//         "
-//         .into()
-//     }
+impl Spec for Size {
+    fn query(&self) -> String {
+        "
+        SELECT operator_id::int8, worker_id::int8
+        FROM mz_introspection.mz_arrangement_heap_size_raw
+        UNION ALL
+        SELECT operator_id::int8, worker_id::int8
+        FROM mz_introspection.mz_arrangement_batcher_size_raw
+        "
+        .into()
+    }
 
-//     fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
-//         let id = row.get::<i64, _>("operator_id").try_into()?;
-//         let worker_id = row.get::<i64, _>("worker_id").try_into()?;
-//         Ok(Data::Capacity(id, worker_id))
-//     }
-// }
+    fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
+        let id = row.get::<i64, _>("operator_id").try_into()?;
+        let worker_id = row.get::<i64, _>("worker_id").try_into()?;
+        Ok(Data::Size(id, worker_id))
+    }
+}
 
-// pub struct Records;
+pub struct Capacity;
 
-// impl Spec for Records {
-//     fn query(&self) -> String {
-//         "
-//         SELECT operator_id::int8, worker_id::int8
-//         FROM mz_introspection.mz_arrangement_records_raw
-//         UNION ALL
-//         SELECT operator_id::int8, worker_id::int8
-//         FROM mz_introspection.mz_arrangement_batcher_records_raw
-//         "
-//         .into()
-//     }
+impl Spec for Capacity {
+    fn query(&self) -> String {
+        "
+        SELECT operator_id::int8, worker_id::int8
+        FROM mz_introspection.mz_arrangement_heap_capacity_raw
+        UNION ALL
+        SELECT operator_id::int8, worker_id::int8
+        FROM mz_introspection.mz_arrangement_batcher_capacity_raw
+        "
+        .into()
+    }
 
-//     fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
-//         let id = row.get::<i64, _>("operator_id").try_into()?;
-//         let worker_id = row.get::<i64, _>("worker_id").try_into()?;
-//         Ok(Data::Records(id, worker_id))
-//     }
-// }
+    fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
+        let id = row.get::<i64, _>("operator_id").try_into()?;
+        let worker_id = row.get::<i64, _>("worker_id").try_into()?;
+        Ok(Data::Capacity(id, worker_id))
+    }
+}
+
+pub struct Records;
+
+impl Spec for Records {
+    fn query(&self) -> String {
+        "
+        SELECT operator_id::int8, worker_id::int8
+        FROM mz_introspection.mz_arrangement_records_raw
+        UNION ALL
+        SELECT operator_id::int8, worker_id::int8
+        FROM mz_introspection.mz_arrangement_batcher_records_raw
+        "
+        .into()
+    }
+
+    fn parse(&self, row: &PgRow) -> anyhow::Result<Data> {
+        let id = row.get::<i64, _>("operator_id").try_into()?;
+        let worker_id = row.get::<i64, _>("worker_id").try_into()?;
+        Ok(Data::Records(id, worker_id))
+    }
+}

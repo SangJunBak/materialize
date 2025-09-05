@@ -118,6 +118,6 @@ async fn profile_dataflow(
     // let profile_data = pprof::serialize(&prof)?;
 
     // Return the raw bytes instead of wrapping in a response struct
-    Ok(vec![])
+    Ok(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     // Ok(profile_data)
 }
