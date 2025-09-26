@@ -8,7 +8,16 @@
 # by the Apache License, Version 2.0.
 
 
-from materialize.checks.actions import Action, Initialize, Manipulate, Sleep, Validate
+from textwrap import dedent
+from materialize.checks.actions import (
+    Action,
+    Initialize,
+    Manipulate,
+    Sleep,
+    Testdrive,
+    Validate,
+)
+from materialize.checks.all_checks.drop_index import DropIndex
 from materialize.checks.checks import Check
 from materialize.checks.executors import Executor
 from materialize.checks.features import Features
@@ -25,6 +34,7 @@ from materialize.checks.scenarios import Scenario
 from materialize.mz_version import MzVersion
 from materialize.mzcompose.services.materialized import LEADER_STATUS_HEALTHCHECK
 from materialize.version_list import (
+    fetch_self_managed_versions,
     get_published_minor_mz_versions,
     get_self_managed_versions,
 )
@@ -506,6 +516,86 @@ class ActivateSourceVersioningMigration(Scenario):
                 additional_system_parameter_defaults={
                     "force_source_table_syntax": "true",
                 },
+            ),
+            Validate(self),
+        ]
+
+
+class LoginAndSelect(Check):
+    def initialize(self) -> Testdrive:
+        return Testdrive(
+            dedent(
+                """
+            $ postgres-execute connection=postgres://mz_system:weewoo@${testdrive.materialize-sql-addr}
+            CREATE DATABASE db1
+            SET DATABASE = db1
+            CREATE SCHEMA schema1
+            SET SCHEMA = schema1
+            CREATE ROLE user1 WITH LOGIN PASSWORD 'weewoo'
+            CREATE TABLE t1 (c int)
+            """
+            )
+        )
+
+    def validate(self) -> Testdrive:
+        return Testdrive(
+            dedent(
+                """
+            $ postgres-execute connection=postgres://user1:weewoo@${testdrive.materialize-sql-addr}
+            SELECT * FROM db1.schema1.t1
+            """
+            )
+        )
+
+
+class UpgradeEntireMzFromSelfManagedV25_2OldestToLatestPatchRelease(Scenario):
+    """
+    For incident 697, we need to upgrade from the oldest patch release of v25.2 to the latest patch release of v25.2.
+    """
+
+    def __init__(
+        self,
+        checks: list[type[Check]],
+        executor: Executor,
+        features: Features,
+        seed: str | None = None,
+    ):
+        super().__init__([LoginAndSelect], executor, features, seed)
+
+    def base_version(self) -> MzVersion:
+        self_managed_versions = fetch_self_managed_versions()
+        v25_2_versions = sorted(
+            [
+                v.version
+                for v in self_managed_versions
+                if v.helm_version.major == 25 and v.helm_version.minor == 2
+            ]
+        )
+        self.v25_2_versions = v25_2_versions
+
+        return v25_2_versions[0]
+
+    def actions(self) -> list[Action]:
+        latest_v25_2 = self.v25_2_versions[-1]
+        print(f"Upgrading from tag {self.base_version()} to {latest_v25_2}")
+        environment_extra = [
+            "MZ_LISTENERS_CONFIG_PATH=/listener_configs/password.json",
+            "MZ_EXTERNAL_LOGIN_PASSWORD_MZ_SYSTEM=weewoo",
+        ]
+        return [
+            StartMz(
+                self,
+                tag=self.base_version(),
+                environment_extra=environment_extra,
+            ),
+            Initialize(self),
+            KillMz(
+                capture_logs=True
+            ),  #  We always use True here otherwise docker-compose will lose the pre-upgrade logs
+            StartMz(
+                self,
+                tag=latest_v25_2,
+                environment_extra=environment_extra,
             ),
             Validate(self),
         ]

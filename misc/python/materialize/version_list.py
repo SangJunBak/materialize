@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import frontmatter
@@ -30,17 +31,36 @@ from materialize.mz_version import MzVersion
 MZ_ROOT = Path(os.environ["MZ_ROOT"])
 
 
+@dataclass
+class SelfManagedVersion:
+    helm_version: MzVersion
+    version: MzVersion
+
+
+def fetch_self_managed_versions() -> list[SelfManagedVersion]:
+    return [
+        SelfManagedVersion(
+            MzVersion.parse_mz(entry["version"]),
+            MzVersion.parse_mz(entry["appVersion"]),
+        )
+        for entry in yaml.safe_load(
+            requests.get("https://materializeinc.github.io/materialize/index.yaml").text
+        )["entries"]["materialize-operator"]
+    ]
+
+
 def get_self_managed_versions() -> list[MzVersion]:
     prefixes = set()
     result = set()
-    for entry in yaml.safe_load(
-        requests.get("https://materializeinc.github.io/materialize/index.yaml").text
-    )["entries"]["materialize-operator"]:
-        helm_version = MzVersion.parse_mz(entry["version"])
-        version = MzVersion.parse_mz(entry["appVersion"])
-        prefix = (version.major, version.minor)
-        if not version.prerelease and prefix not in prefixes and not helm_version.prerelease:
-            result.add(version)
+    self_managed_versions = fetch_self_managed_versions()
+    for version_info in self_managed_versions:
+        prefix = (version_info.version.major, version_info.version.minor)
+        if (
+            not version_info.version.prerelease
+            and prefix not in prefixes
+            and not version_info.helm_version.prerelease
+        ):
+            result.add(version_info.version)
             prefixes.add(prefix)
     return sorted(result)
 
