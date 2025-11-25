@@ -518,7 +518,7 @@ fn test_statement_logging_throttling() {
         1.0,
         test_util::TestHarness::default().with_system_parameter_default(
             "statement_logging_target_data_rate".to_string(),
-            "100".to_string(),
+            "1000".to_string(),
         ),
     );
     thread::sleep(Duration::from_secs(2));
@@ -536,7 +536,10 @@ fn test_statement_logging_throttling() {
                     "SELECT
     sql,
     throttled_count
-FROM mz_internal.mz_prepared_statement_history mpsh
+FROM
+mz_internal.mz_statement_execution_history mseh
+JOIN mz_internal.mz_prepared_statement_history mpsh
+ON mseh.prepared_statement_id = mpsh.id
 JOIN (SELECT DISTINCT sql, sql_hash, redacted_sql FROM mz_internal.mz_sql_text) mst
 ON mpsh.sql_hash = mst.sql_hash
 WHERE sql IN ('SELECT 1', 'SELECT 2')",
@@ -558,6 +561,70 @@ WHERE sql IN ('SELECT 1', 'SELECT 2')",
         .iter()
         .map(|log| {
             let UInt8(throttled_count) = log.get(1);
+            throttled_count
+        })
+        .sum::<u64>();
+    assert!(
+        throttled_count > 0,
+        "at least some statements should have been throttled"
+    );
+
+    assert_eq!(logs.len() + usize::cast_from(throttled_count), 101);
+}
+
+#[mz_ore::test]
+fn test_statement_logging_prepared_statement_throttling() {
+    let (server, mut client) = setup_statement_logging_core(
+        1.0,
+        1.0,
+        test_util::TestHarness::default().with_system_parameter_default(
+            "statement_logging_target_data_rate".to_string(),
+            "1000".to_string(),
+        ),
+    );
+    thread::sleep(Duration::from_secs(2));
+    let statement = client.prepare("SELECT 1").unwrap();
+
+    for _ in 0..100 {
+        client.execute(&statement, &[]).unwrap();
+    }
+    thread::sleep(Duration::from_secs(4));
+    client.execute("SELECT 2", &[]).unwrap();
+    let mut client = server.connect_internal(postgres::NoTls).unwrap();
+    let logs = Retry::default()
+        .max_duration(Duration::from_secs(60))
+        .retry(|_| {
+            let sl_results = client
+                .query(
+                    "SELECT
+    sql,
+    throttled_count
+FROM mz_internal.mz_statement_execution_history mseh
+JOIN mz_internal.mz_prepared_statement_history mpsh
+ON mseh.prepared_statement_id = mpsh.id
+JOIN (SELECT DISTINCT sql, sql_hash, redacted_sql FROM mz_internal.mz_sql_text) mst
+ON mpsh.sql_hash = mst.sql_hash
+WHERE sql IN ('SELECT 1', 'SELECT 2')",
+                    &[],
+                )
+                .unwrap();
+
+            if sl_results.iter().any(|stmt| {
+                let sql: String = stmt.get(0);
+                sql == "SELECT 2"
+            }) {
+                Ok(sl_results)
+            } else {
+                Err(())
+            }
+        })
+        .expect("Never saw last statement (`SELECT 2`)");
+    let throttled_count = logs
+        .iter()
+        .map(|log| {
+            let txt = log.get::<_, String>(0);
+            let UInt8(throttled_count) = log.get(1);
+            println!("throttled_count for row {}: {}", txt, throttled_count);
             throttled_count
         })
         .sum::<u64>();
