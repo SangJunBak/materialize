@@ -5695,6 +5695,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mz-authenticator-types"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "mz-repr",
+ "tokio",
+ "uuid",
+ "workspace-hack",
+]
+
+[[package]]
 name = "mz-avro"
 version = "0.7.0"
 dependencies = [
@@ -5782,6 +5793,7 @@ dependencies = [
  "launchdarkly-server-sdk",
  "mz-alloc",
  "mz-alloc-default",
+ "mz-authenticator-types",
  "mz-build-info",
  "mz-dyncfg",
  "mz-dyncfg-file",
@@ -6407,6 +6419,7 @@ dependencies = [
  "mz-alloc-default",
  "mz-auth",
  "mz-authenticator",
+ "mz-authenticator-types",
  "mz-aws-secrets-controller",
  "mz-build-info",
  "mz-catalog",
@@ -6667,6 +6680,7 @@ name = "mz-frontegg-auth"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "clap",
@@ -6674,6 +6688,7 @@ dependencies = [
  "futures",
  "jsonwebtoken",
  "lru 0.16.3",
+ "mz-authenticator-types",
  "mz-ore",
  "mz-repr",
  "prometheus",
@@ -7450,6 +7465,7 @@ dependencies = [
  "mz-adapter-types",
  "mz-auth",
  "mz-authenticator",
+ "mz-authenticator-types",
  "mz-frontegg-auth",
  "mz-ore",
  "mz-pgcopy",
