@@ -1037,7 +1037,7 @@ async fn auth(
                 include_www_authenticate_header,
             });
         }
-        // TODO (SangJunBak): Implement password auth flow
+        // TODO (Oidc): Implement password auth flow
         // for this authenticator variant.
         Authenticator::Oidc { oidc, password: _ } => match creds {
             Some(Credentials::Token { token }) => {
