@@ -1208,11 +1208,45 @@ dependencies = [
 
 [[package]]
 name = "axum"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
+dependencies = [
+ "async-trait",
+ "axum-core 0.4.5",
+ "bytes",
+ "futures-util",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "itoa",
+ "matchit 0.7.3",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustversion",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tower 0.5.3",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8"
 dependencies = [
- "axum-core",
+ "axum-core 0.5.6",
  "base64 0.22.1",
  "bytes",
  "form_urlencoded",
@@ -1223,7 +1257,7 @@ dependencies = [
  "hyper 1.8.1",
  "hyper-util",
  "itoa",
- "matchit",
+ "matchit 0.8.4",
  "memchr",
  "mime",
  "percent-encoding",
@@ -1237,6 +1271,27 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower 0.5.3",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -1267,8 +1322,8 @@ version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fef252edff26ddba56bbcdf2ee3307b8129acb86f5749b68990c168a6fcc9c76"
 dependencies = [
- "axum",
- "axum-core",
+ "axum 0.8.8",
+ "axum-core 0.5.6",
  "bytes",
  "futures-core",
  "futures-util",
@@ -4728,6 +4783,21 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+dependencies = [
+ "base64 0.22.1",
+ "js-sys",
+ "pem",
+ "ring",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
+name = "jsonwebtoken"
 version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
@@ -5286,6 +5356,12 @@ dependencies = [
 
 [[package]]
 name = "matchit"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
+
+[[package]]
+name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
@@ -5470,7 +5546,7 @@ name = "mz"
 version = "0.3.1"
 dependencies = [
  "assert_cmd",
- "axum",
+ "axum 0.8.8",
  "clap",
  "csv",
  "dirs",
@@ -5690,8 +5766,7 @@ dependencies = [
 name = "mz-authenticator"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "jsonwebtoken",
+ "jsonwebtoken 9.3.1",
  "mz-adapter",
  "mz-auth",
  "mz-frontegg-auth",
@@ -5778,7 +5853,7 @@ version = "26.12.0-dev.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "bytes",
  "bytesize",
  "chrono",
@@ -5789,11 +5864,10 @@ dependencies = [
  "hyper 1.8.1",
  "hyper-openssl",
  "hyper-util",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "launchdarkly-server-sdk",
  "mz-alloc",
  "mz-alloc-default",
- "mz-auth",
  "mz-build-info",
  "mz-dyncfg",
  "mz-dyncfg-file",
@@ -6079,7 +6153,7 @@ name = "mz-clusterd"
 version = "26.12.0-dev.0"
 dependencies = [
  "anyhow",
- "axum",
+ "axum 0.8.8",
  "clap",
  "fail",
  "futures",
@@ -6383,7 +6457,7 @@ dependencies = [
  "askama",
  "assert_cmd",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "axum-extra",
  "base64 0.22.1",
  "bytes",
@@ -6409,7 +6483,7 @@ dependencies = [
  "insta",
  "ipnet",
  "itertools 0.14.0",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "libc",
  "maplit",
  "mime",
@@ -6680,13 +6754,12 @@ name = "mz-frontegg-auth"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "async-trait",
- "axum",
+ "axum 0.8.8",
  "base64 0.22.1",
  "clap",
  "derivative",
  "futures",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "lru 0.16.3",
  "mz-auth",
  "mz-ore",
@@ -6708,7 +6781,7 @@ dependencies = [
 name = "mz-frontegg-client"
 version = "0.0.0"
 dependencies = [
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "mz-frontegg-auth",
  "mz-ore",
  "reqwest",
@@ -6726,13 +6799,13 @@ name = "mz-frontegg-mock"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "axum",
+ "axum 0.8.8",
  "axum-extra",
  "base64 0.22.1",
  "chrono",
  "clap",
  "hyper 1.8.1",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "mz-frontegg-auth",
  "mz-ore",
  "openssl",
@@ -6752,7 +6825,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "askama",
- "axum",
+ "axum 0.8.8",
  "axum-extra",
  "headers",
  "http 1.4.0",
@@ -6846,7 +6919,7 @@ dependencies = [
  "aws-sdk-kms",
  "base64 0.22.1",
  "clap",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "mz-aws-util",
  "pem",
  "serde",
@@ -7008,9 +7081,9 @@ name = "mz-oidc-mock"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "axum",
+ "axum 0.7.9",
  "base64 0.22.1",
- "jsonwebtoken",
+ "jsonwebtoken 9.3.1",
  "mz-authenticator",
  "mz-ore",
  "openssl",
@@ -7125,7 +7198,7 @@ version = "26.12.0-dev.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "clap",
  "futures",
  "http 1.4.0",
@@ -7593,7 +7666,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "askama",
- "axum",
+ "axum 0.8.8",
  "axum-extra",
  "bytesize",
  "cfg-if",
@@ -8123,7 +8196,7 @@ dependencies = [
  "async-trait",
  "aws-credential-types",
  "aws-sdk-sts",
- "axum",
+ "axum 0.8.8",
  "bincode",
  "bytes",
  "bytesize",
@@ -9404,7 +9477,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "bytes",
  "clap",
  "differential-dataflow",
@@ -12463,7 +12536,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb7613188ce9f7df5bfe185db26c5814347d110db17920415cf2fbcad85e7203"
 dependencies = [
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "base64 0.22.1",
  "bytes",
  "flate2",
@@ -12564,7 +12637,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "151b5a3e3c45df17466454bb74e9ecedecc955269bdedbf4d150dfa393b55a36"
 dependencies = [
- "axum-core",
+ "axum-core 0.5.6",
  "cookie",
  "futures-util",
  "http 1.4.0",
@@ -12671,7 +12744,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce8cce604865576b7751b7a6bc3058f754569a60d689328bb74c52b1d87e355b"
 dependencies = [
  "async-trait",
- "axum-core",
+ "axum-core 0.5.6",
  "base64 0.22.1",
  "futures",
  "http 1.4.0",
@@ -13686,8 +13759,8 @@ dependencies = [
  "aws-smithy-runtime",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "axum",
- "axum-core",
+ "axum 0.8.8",
+ "axum-core 0.5.6",
  "base16ct",
  "bindgen",
  "bit-set",
