@@ -42,6 +42,7 @@ use hyper_openssl::client::legacy::MaybeHttpsStream;
 use hyper_util::rt::TokioIo;
 use mz_adapter::session::{Session as AdapterSession, SessionConfig as AdapterSessionConfig};
 use mz_adapter::{AdapterError, AdapterNotice, Client, SessionClient, WebhookAppenderCache};
+use mz_auth::Authenticated;
 use mz_auth::password::Password;
 use mz_authenticator::Authenticator;
 use mz_controller::ReplicaHttpLocator;
@@ -551,6 +552,7 @@ async fn x_materialize_user_header_auth(mut req: Request, next: Next) -> impl In
         req.extensions_mut().insert(AuthedUser {
             name: username,
             external_metadata_rx: None,
+            authenticated: Authenticated,
         });
     }
     Ok(next.run(req).await)
@@ -568,6 +570,7 @@ enum ConnProtocol {
 pub struct AuthedUser {
     name: String,
     external_metadata_rx: Option<watch::Receiver<ExternalUserMetadata>>,
+    authenticated: Authenticated,
 }
 
 pub struct AuthedClient {
@@ -590,14 +593,17 @@ impl AuthedClient {
         F: FnOnce(&mut AdapterSession),
     {
         let conn_id = adapter_client.new_conn_id()?;
-        let mut session = adapter_client.new_session(AdapterSessionConfig {
-            conn_id,
-            uuid: epoch_to_uuid_v7(&(now)()),
-            user: user.name,
-            client_ip: Some(peer_addr),
-            external_metadata_rx: user.external_metadata_rx,
-            helm_chart_version,
-        });
+        let mut session = adapter_client.new_session(
+            AdapterSessionConfig {
+                conn_id,
+                uuid: epoch_to_uuid_v7(&(now)()),
+                user: user.name,
+                client_ip: Some(peer_addr),
+                external_metadata_rx: user.external_metadata_rx,
+                helm_chart_version,
+            },
+            user.authenticated,
+        );
         let connection_guard = active_connection_counter.allocate_connection(session.user())?;
 
         session_config(&mut session);
@@ -757,16 +763,19 @@ pub async fn handle_login(
     let Ok(adapter_client) = adapter_client_rx.clone().await else {
         return StatusCode::INTERNAL_SERVER_ERROR;
     };
-    if let Err(err) = adapter_client.authenticate(&username, &password).await {
-        warn!(?err, "HTTP login failed authentication");
-        return StatusCode::UNAUTHORIZED;
+    let authenticated = match adapter_client.authenticate(&username, &password).await {
+        Ok(authenticated) => authenticated,
+        Err(err) => {
+            warn!(?err, "HTTP login failed authentication");
+            return StatusCode::UNAUTHORIZED;
+        }
     };
-
     // Create session data
     let session_data = TowerSessionData {
         username,
         created_at: SystemTime::now(),
         last_activity: SystemTime::now(),
+        authenticated,
     };
     // Store session data
     let session = session.and_then(|Extension(session)| Some(session));
@@ -823,6 +832,7 @@ async fn http_auth(
             req.extensions_mut().insert(AuthedUser {
                 name: session_data.username,
                 external_metadata_rx: None,
+                authenticated: session_data.authenticated,
             });
             return Ok(next.run(req).await);
         }
@@ -982,21 +992,22 @@ async fn auth(
     allowed_roles: AllowedRoles,
     include_www_authenticate_header: bool,
 ) -> Result<AuthedUser, AuthError> {
-    let (name, external_metadata_rx) = match authenticator {
+    let (name, external_metadata_rx, authenticated) = match authenticator {
         Authenticator::Frontegg(frontegg) => match creds {
             Some(Credentials::Password { username, password }) => {
-                let auth_session = frontegg.authenticate(&username, &password.0).await?;
+                let (auth_session, authenticated) =
+                    frontegg.authenticate(&username, &password.0).await?;
                 let name = auth_session.user().into();
                 let external_metadata_rx = Some(auth_session.external_metadata_rx());
-                (name, external_metadata_rx)
+                (name, external_metadata_rx, authenticated)
             }
             Some(Credentials::Token { token }) => {
-                let claims = frontegg.validate_access_token(&token, None)?;
+                let (claims, authenticated) = frontegg.validate_access_token(&token, None)?;
                 let (_, external_metadata_rx) = watch::channel(ExternalUserMetadata {
                     user_id: claims.user_id,
                     admin: claims.is_admin,
                 });
-                (claims.user, Some(external_metadata_rx))
+                (claims.user, Some(external_metadata_rx), authenticated)
             }
             None => {
                 return Err(AuthError::MissingHttpAuthentication {
@@ -1006,11 +1017,11 @@ async fn auth(
         },
         Authenticator::Password(adapter_client) => match creds {
             Some(Credentials::Password { username, password }) => {
-                adapter_client
+                let authenticated = adapter_client
                     .authenticate(&username, &password)
                     .await
                     .map_err(|_| AuthError::InvalidCredentials)?;
-                (username, None)
+                (username, None, authenticated)
             }
             _ => {
                 return Err(AuthError::MissingHttpAuthentication {
@@ -1029,21 +1040,21 @@ async fn auth(
         Authenticator::Oidc(oidc) => match creds {
             Some(Credentials::Token { token }) => {
                 // Validate JWT token
-                let claims = oidc
-                    .validate_access_token(&token, None)
+                let (claims, authenticated) = oidc
+                    .authenticate(&token, None)
                     .await
                     .map_err(|_| AuthError::InvalidCredentials)?;
                 let name = claims.username().to_string();
-                (name, None)
+                (name, None, authenticated)
             }
             Some(Credentials::Password { username, password }) => {
                 // Allow JWT to be passed as password
-                let claims = oidc
-                    .validate_access_token(&password.0, Some(&username))
+                let (claims, authenticated) = oidc
+                    .authenticate(&password.0, Some(&username))
                     .await
                     .map_err(|_| AuthError::InvalidCredentials)?;
                 let name = claims.username().to_string();
-                (name, None)
+                (name, None, authenticated)
             }
             None => {
                 return Err(AuthError::MissingHttpAuthentication {
@@ -1059,7 +1070,7 @@ async fn auth(
                 Some(Credentials::Password { username, .. }) => username,
                 _ => HTTP_DEFAULT_USER.name.to_owned(),
             };
-            (name, None)
+            (name, None, Authenticated)
         }
     };
 
@@ -1068,6 +1079,7 @@ async fn auth(
     Ok(AuthedUser {
         name,
         external_metadata_rx,
+        authenticated,
     })
 }
 
@@ -1134,6 +1146,7 @@ pub struct TowerSessionData {
     username: String,
     created_at: SystemTime,
     last_activity: SystemTime,
+    authenticated: Authenticated,
 }
 
 #[cfg(test)]
