@@ -32,6 +32,9 @@ pub struct OidcConfig {
     pub oidc_issuer: String,
     /// Optional OIDC audience (client ID).
     /// If set, validates that the JWT's `aud` claim contains this value.
+    /// It is insecure to set this to None because it is the only
+    /// mechanism preventing attackers from authenticating using a JWT
+    /// issued by a dummy application, but from the same identity provider.
     pub oidc_audience: Option<String>,
 }
 
@@ -114,7 +117,7 @@ impl OidcClaims {
     /// Extract the username to use for the session.
     ///
     /// Priority: email > sub
-    // TODO (SangJunBak): Add a configuration variable to use a different username field.
+    // TODO (Oidc): Add a configuration variable to use a different username field.
     pub fn username(&self) -> &str {
         self.email.as_deref().unwrap_or(&self.sub)
     }
@@ -285,7 +288,7 @@ impl GenericOidcAuthenticatorInner {
         let decoding_key = self.find_key(&kid).await?;
 
         // Set up validation
-        // TODO (SangJunBak): Make JWT expiration configurable.
+        // TODO (Oidc): Make JWT expiration configurable.
         let mut validation = Validation::new(header.alg);
         validation.set_issuer(&[&self.issuer]);
         if let Some(ref audience) = self.audience {

@@ -164,7 +164,7 @@ where
 
     // If oidc_auth_enabled exists as an option, return its value and filter it from
     // the remaining options.
-    // TODO (SangJunBak): Use oidc_auth_enabled boolean and Authenticator::OIDC
+    // TODO (Oidc): Use oidc_auth_enabled boolean and Authenticator::OIDC
     // to decide whether or not we want to use OIDC authentication or password
     // authentication.
     let (_oidc_auth_enabled, options) = extract_oidc_auth_enabled_from_options(options);

@@ -5752,7 +5752,6 @@ dependencies = [
  "base64 0.22.1",
  "itertools 0.14.0",
  "mz-ore",
- "mz-repr",
  "openssl",
  "proptest",
  "proptest-derive",
