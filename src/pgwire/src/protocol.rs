@@ -112,8 +112,8 @@ where
     pub params: BTreeMap<String, String>,
     /// Frontegg JWT authenticator.
     pub frontegg: Option<FronteggAuthenticator>,
-    /// OIDC JWT authenticator.
-    pub oidc: Option<GenericOidcAuthenticator>,
+    /// OIDC authenticator.
+    pub oidc: GenericOidcAuthenticator,
     /// The authentication method defined by the server's listener
     /// configuration.
     pub authenticator_kind: AuthenticatorKind,
@@ -2914,7 +2914,7 @@ fn fetch_message(
 fn get_authenticator(
     authenticator_kind: AuthenticatorKind,
     frontegg: Option<FronteggAuthenticator>,
-    oidc: Option<GenericOidcAuthenticator>,
+    oidc: GenericOidcAuthenticator,
     adapter_client: mz_adapter::Client,
     // If oidc_auth_enabled exists as an option in the connection options,
     oidc_auth_option_enabled: bool,
@@ -2926,7 +2926,6 @@ fn get_authenticator(
         AuthenticatorKind::Password => Authenticator::Password(adapter_client),
         AuthenticatorKind::Sasl => Authenticator::Sasl(adapter_client),
         AuthenticatorKind::Oidc => {
-            let oidc = oidc.expect("OIDC authenticator should exist with AuthenticatorKind::Oidc");
             if oidc_auth_option_enabled {
                 Authenticator::Oidc(oidc)
             } else {
