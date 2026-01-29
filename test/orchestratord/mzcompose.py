@@ -953,6 +953,7 @@ class SystemParamConfigMap(Modification):
             6875
             if (version >= MzVersion.parse_mz("v0.147.0") and auth == "Password")
             or (version >= MzVersion.parse_mz("v26.0.0") and auth == "Sasl")
+            or (version >= MzVersion.parse_mz("v26.10.0") and auth == "Oidc")
             else 6877
         )
 
@@ -1294,6 +1295,8 @@ class AuthenticatorKind(Modification):
             result.append("Password")
         if version >= MzVersion.parse_mz("v26.0.0"):
             result.append("Sasl")
+        if version >= MzVersion.parse_mz("v26.10.0"):
+            result.append("Oidc")
         return result
 
     @classmethod
@@ -1302,7 +1305,7 @@ class AuthenticatorKind(Modification):
 
     def modify(self, definition: dict[str, Any]) -> None:
         definition["materialize"]["spec"]["authenticatorKind"] = self.value
-        if self.value == "Password" or self.value == "Sasl":
+        if self.value == "Password" or self.value == "Sasl" or self.value == "Oidc":
             definition["secret"]["stringData"][
                 "external_login_password_mz_system"
             ] = "superpassword"
@@ -1321,10 +1324,14 @@ class AuthenticatorKind(Modification):
         if self.value == "Sasl" and version < MzVersion.parse_mz("v26.0.0"):
             return
 
+        if self.value == "Oidc" and version < MzVersion.parse_mz("v26.10.0"):
+            return
+
         port = (
             6875
             if (version >= MzVersion.parse_mz("v0.147.0") and self.value == "Password")
             or (version >= MzVersion.parse_mz("v26.0.0") and self.value == "Sasl")
+            or (version >= MzVersion.parse_mz("v26.10.0") and self.value == "Oidc")
             else 6877
         )
         for i in range(120):
@@ -1428,6 +1435,14 @@ class AuthenticatorKind(Modification):
                         http_auth == "Password"
                     ), f"Expected HTTP listener to use Password, got {http_auth}"
                     print(f"Password mode verified: SQL={sql_auth}, HTTP={http_auth}")
+                elif self.value == "Oidc":
+                    assert (
+                        sql_auth == "Oidc"
+                    ), f"Expected SQL listener to use Oidc, got {sql_auth}"
+                    assert (
+                        http_auth == "Oidc"
+                    ), f"Expected HTTP listener to use Oidc, got {http_auth}"
+                    print(f"Oidc mode verified: SQL={sql_auth}, HTTP={http_auth}")
                 elif self.value == "None":
                     assert (
                         sql_auth == "None"

@@ -312,7 +312,7 @@ def environment(args: argparse.Namespace):
         resources[0]["stringData"][
             "external_login_password_mz_system"
         ] = args.external_login_password_mz_system
-        resources[-1]["spec"]["authenticatorKind"] = "Password"
+        resources[-1]["spec"]["authenticatorKind"] = "Oidc"
 
     env_kubectl("apply", "-f", "-", input=yaml.safe_dump_all(resources).encode())
 
