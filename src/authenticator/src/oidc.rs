@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
+use jsonwebtoken::{
+    DecodingKey, Validation, decode, decode_header, errors::ErrorKind, jwk::JwkSet,
+};
 use mz_adapter::Client as AdapterClient;
 use mz_adapter_types::dyncfgs::{OIDC_AUDIENCE, OIDC_ISSUER};
 use mz_auth::Authenticated;
@@ -54,33 +56,73 @@ pub enum OidcError {
     Jwt,
     /// User does not match expected value.
     WrongUser,
-    InvalidAudience,
+    InvalidAudience(
+        /// Expected audience. If None,
+        /// the audience is not validated.
+        Option<String>,
+    ),
+    InvalidIssuer(
+        /// Expected issuer.
+        String,
+    ),
+    ExpiredSignature,
 }
 
 impl std::fmt::Display for OidcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OidcError::InvalidIssuerUrl(issuer) => {
-                write!(f, "Failed to parse OIDC issuer URL {}", issuer)
+                write!(f, "Failed to parse the OIDC issuer URL {}", issuer)
             }
             OidcError::FetchFromProviderFailed(url, status) => {
                 let status_str = status
                     .map(|s| format!(" with status code {}", s))
-                    .unwrap_or("".to_string());
+                    .unwrap_or_else(|| "".to_string());
                 write!(f, "Failed to fetch {}{}", url, status_str)
             }
-            OidcError::MissingKid => write!(f, "Missing key ID in JWT header"),
+            OidcError::MissingKid => write!(f, "Failed to find the key ID in the JWT's header"),
             OidcError::NoMatchingKey(kid, keys) => {
-                write!(f, "No matching key in JWKS for kid {kid} in {keys}")
+                write!(f, "JWT key ID {} was not found in JWKS {}", kid, keys)
             }
-            OidcError::Jwt => write!(f, "Failed to validate JWT"),
-            OidcError::WrongUser => write!(f, "User does not match expected value"),
-            OidcError::InvalidAudience => write!(f, "Invalid audience in JWT"),
+            OidcError::Jwt => write!(f, "Failed to validate the JWT"),
+            OidcError::WrongUser => write!(f, "User did not match expected value"),
+            OidcError::InvalidAudience(audience) => {
+                if let Some(audience) = audience {
+                    write!(f, "Expected audience {} in the JWT", audience)
+                } else {
+                    debug_assert!(
+                        false,
+                        "Receieved an audience validation error when audience validation is disabled"
+                    );
+                    write!(f, "Audience validation failed")
+                }
+            }
+            OidcError::InvalidIssuer(issuer) => {
+                write!(f, "Expected issuer {} in the JWT", issuer)
+            }
+            OidcError::ExpiredSignature => write!(f, "The JWT has expired"),
         }
     }
 }
 
 impl std::error::Error for OidcError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OidcJwtErrorContext {
+    expected_audience: Option<String>,
+    expected_issuer: String,
+}
+
+impl OidcError {
+    fn from_jwt_error(err: jsonwebtoken::errors::Error, context: OidcJwtErrorContext) -> Self {
+        match err.kind() {
+            ErrorKind::InvalidAudience => OidcError::InvalidAudience(context.expected_audience),
+            ErrorKind::InvalidIssuer => OidcError::InvalidIssuer(context.expected_issuer),
+            ErrorKind::ExpiredSignature => OidcError::ExpiredSignature,
+            _ => OidcError::Jwt,
+        }
+    }
+}
 
 fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
@@ -283,10 +325,10 @@ impl GenericOidcAuthenticatorInner {
 
         {
             let decoding_keys = self.decoding_keys.lock().expect("lock poisoned");
-            return Err(OidcError::NoMatchingKey(
+            Err(OidcError::NoMatchingKey(
                 kid.to_string(),
                 decoding_keys.keys().cloned().collect(),
-            ));
+            ))
         }
     }
 
@@ -303,33 +345,37 @@ impl GenericOidcAuthenticatorInner {
             if aud.is_empty() { None } else { Some(aud) }
         };
 
-        // Decode header to get key ID (kid) and algorithm
+        let jwt_error_context = OidcJwtErrorContext {
+            expected_audience: audience.clone(),
+            expected_issuer: issuer.clone(),
+        };
+
+        // Decode header to get key ID (kid) and the
+        // decoding algorithm
         let header = decode_header(token).map_err(|e| {
             debug!("Failed to decode JWT header: {:?}", e);
-            OidcError::Jwt
+            OidcError::from_jwt_error(e, jwt_error_context.clone())
         })?;
 
         let kid = header.kid.ok_or(OidcError::MissingKid)?;
-        // Find matching key from cached keys
+        // Find the matching key from our set of cached keys. If not found,
+        // fetch the JWKS from the provider and cache the keys
         let decoding_key = self.find_key(&kid, &issuer).await?;
 
-        // Set up validation
+        // Set up audience and issuer validation
         let mut validation = Validation::new(header.alg);
         validation.set_issuer(&[&issuer]);
-        if let Some(ref audience) = audience {
+        if let Some(audience) = audience {
             validation.set_audience(&[audience]);
         } else {
             validation.validate_aud = false;
         }
 
         // Decode and validate the token
-        let token_data =
-            decode::<OidcClaims>(token, &(decoding_key.0), &validation).map_err(|e| {
-                debug!("Failed to decode JWT: {:?}", e);
-                OidcError::Jwt
-            })?;
+        let token_data = decode::<OidcClaims>(token, &(decoding_key.0), &validation)
+            .map_err(|e| OidcError::from_jwt_error(e, jwt_error_context.clone()))?;
 
-        // Optionally validate expected user
+        // Optionally validate the expected user
         if let Some(expected) = expected_user {
             if token_data.claims.username() != expected {
                 return Err(OidcError::WrongUser);
