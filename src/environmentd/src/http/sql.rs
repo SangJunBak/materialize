@@ -22,6 +22,7 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use futures::Future;
 use futures::future::BoxFuture;
+use mz_authenticator::OidcError;
 
 use http::StatusCode;
 use itertools::Itertools;
