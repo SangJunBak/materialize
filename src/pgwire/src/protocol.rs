@@ -237,8 +237,8 @@ where
                     warn!(?err, "pgwire connection failed authentication");
                     return conn
                         .send(ErrorResponse::fatal(
-                            SqlState::INVALID_PASSWORD,
-                            "invalid password",
+                            SqlState::INVALID_AUTHORIZATION_SPECIFICATION,
+                            err.to_string(),
                         ))
                         .await;
                 }
