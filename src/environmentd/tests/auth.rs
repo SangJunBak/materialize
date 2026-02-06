@@ -1275,7 +1275,6 @@ async fn test_auth_base_require_tls_frontegg() {
 ///
 /// This test verifies that users can authenticate using OIDC tokens
 /// over TLS connections
-#[allow(clippy::unit_arg)]
 #[mz_ore::test(tokio::test(flavor = "multi_thread", worker_threads = 1))]
 #[cfg_attr(miri, ignore)] // unsupported operation: can't call foreign function `OPENSSL_init_ssl` on OS `linux`
 async fn test_auth_base_require_tls_oidc() {
@@ -1472,7 +1471,6 @@ async fn test_auth_base_require_tls_oidc() {
 ///
 /// This test verifies that when an audience is configured, only JWTs with
 /// matching `aud` claims are accepted.
-#[allow(clippy::unit_arg)]
 #[mz_ore::test(tokio::test(flavor = "multi_thread", worker_threads = 1))]
 #[cfg_attr(miri, ignore)] // unsupported operation: can't call foreign function `OPENSSL_init_ssl` on OS `linux`
 async fn test_auth_oidc_audience_validation() {

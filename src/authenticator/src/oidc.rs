@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
+use jsonwebtoken::jwk::JwkSet;
 use mz_auth::Authenticated;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -124,11 +124,13 @@ impl OidcClaims {
 }
 
 #[derive(Clone)]
-struct OidcDecodingKey(DecodingKey);
+struct OidcDecodingKey(jsonwebtoken::DecodingKey);
 
 impl std::fmt::Debug for OidcDecodingKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JWKS").field("key", &"<redacted>").finish()
+        f.debug_struct("OidcDecodingKey")
+            .field("key", &"<redacted>")
+            .finish()
     }
 }
 
@@ -227,7 +229,7 @@ impl GenericOidcAuthenticatorInner {
 
         let mut keys = BTreeMap::new();
         for jwk in jwks.keys {
-            match DecodingKey::from_jwk(&jwk) {
+            match jsonwebtoken::DecodingKey::from_jwk(&jwk) {
                 Ok(key) => {
                     if let Some(kid) = jwk.common.key_id {
                         keys.insert(kid, OidcDecodingKey(key));
@@ -275,13 +277,13 @@ impl GenericOidcAuthenticatorInner {
         Err(OidcError::NoMatchingKey)
     }
 
-    pub async fn validate_access_token(
+    pub async fn validate_token(
         &self,
         token: &str,
         expected_user: Option<&str>,
     ) -> Result<OidcClaims, OidcError> {
         // Decode header to get key ID (kid) and algorithm
-        let header = decode_header(token).map_err(OidcError::Jwt)?;
+        let header = jsonwebtoken::decode_header(token).map_err(OidcError::Jwt)?;
 
         let kid = header.kid.ok_or(OidcError::MissingKid)?;
         // Find matching key from cached keys
@@ -289,7 +291,7 @@ impl GenericOidcAuthenticatorInner {
 
         // Set up validation
         // TODO (Oidc): Make JWT expiration configurable.
-        let mut validation = Validation::new(header.alg);
+        let mut validation = jsonwebtoken::Validation::new(header.alg);
         validation.set_issuer(&[&self.issuer]);
         if let Some(ref audience) = self.audience {
             validation.set_audience(&[audience]);
@@ -298,8 +300,8 @@ impl GenericOidcAuthenticatorInner {
         }
 
         // Decode and validate the token
-        let token_data =
-            decode::<OidcClaims>(token, &(decoding_key.0), &validation).map_err(OidcError::Jwt)?;
+        let token_data = jsonwebtoken::decode::<OidcClaims>(token, &(decoding_key.0), &validation)
+            .map_err(OidcError::Jwt)?;
 
         // Optionally validate expected user
         if let Some(expected) = expected_user {
@@ -318,10 +320,7 @@ impl GenericOidcAuthenticator {
         token: &str,
         expected_user: Option<&str>,
     ) -> Result<(OidcClaims, Authenticated), OidcError> {
-        let claims = self
-            .inner
-            .validate_access_token(token, expected_user)
-            .await?;
+        let claims = self.inner.validate_token(token, expected_user).await?;
         Ok((claims, Authenticated))
     }
 }

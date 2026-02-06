@@ -55,7 +55,6 @@ mz-dyncfg = { path = "../dyncfg" }
 mz-dyncfgs = { path = "../dyncfgs" }
 mz-frontegg-auth = { path = "../frontegg-auth" }
 mz-frontegg-mock = { path = "../frontegg-mock", optional = true }
-mz-oidc-mock = { path = "../oidc-mock", default-features = false, optional = true }
 mz-http-util = { path = "../http-util" }
 mz-interchange = { path = "../interchange" }
 mz-license-keys = { path = "../license-keys" }
@@ -142,6 +141,7 @@ insta = { version = "1.45", features = ["json"] }
 itertools = "0.14.0"
 jsonwebtoken = { version = "10.3.0", features = ["aws_lc_rs"] }
 mz-environmentd = { path = "../environmentd", default-features = false, features = ["test"] }
+mz-oidc-mock = { path = "../oidc-mock", default-features = false }
 mz-pgrepr = { path = "../pgrepr" }
 mz-pgtest = { path = "../pgtest" }
 mz-repr = { path = "../repr" }
@@ -185,7 +185,6 @@ test = [
     "postgres-openssl",
     "mz-tracing",
     "mz-frontegg-mock",
-    "mz-oidc-mock",
     "tracing-capture",
     "mz-orchestrator-tracing/capture",
 ]

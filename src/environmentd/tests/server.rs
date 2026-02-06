@@ -2656,7 +2656,6 @@ fn test_internal_http_auth() {
         .send()
         .unwrap();
 
-    tracing::info!("response: {res:?}");
     assert_eq!(
         res.status(),
         StatusCode::OK,
@@ -2672,7 +2671,6 @@ fn test_internal_http_auth() {
         .send()
         .unwrap();
 
-    tracing::info!("response: {res:?}");
     assert_eq!(
         res.status(),
         StatusCode::OK,
@@ -2690,7 +2688,6 @@ fn test_internal_http_auth() {
         .send()
         .unwrap();
 
-    tracing::info!("response: {res:?}");
     assert_eq!(
         res.status(),
         StatusCode::OK,
@@ -2706,7 +2703,6 @@ fn test_internal_http_auth() {
         .send()
         .unwrap();
 
-    tracing::info!("response: {res:?}");
     // invalid header returns an error
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{:?}", res.text());
 }

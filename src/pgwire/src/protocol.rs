@@ -201,6 +201,12 @@ where
 
             let auth_response = frontegg.authenticate(&user, &password).await;
             match auth_response {
+                // Create a session based on the auth session.
+                //
+                // In particular, it's important that the username come from the
+                // auth session, as Frontegg may return an email address with
+                // different casing than the user supplied via the pgwire
+                // username fN
                 Ok((mut auth_session, authenticated)) => {
                     let session = adapter_client.new_session(
                         SessionConfig {
@@ -725,7 +731,7 @@ impl From<io::Error> for PasswordRequestError {
 }
 
 /// Requests a cleartext password from a connection and returns it if it is valid.
-/// Sends an error response in the connection and returns None if the password
+/// Sends an error response in the connection if the password
 /// is not valid.
 async fn request_cleartext_password<A>(
     conn: &mut FramedConn<A>,
