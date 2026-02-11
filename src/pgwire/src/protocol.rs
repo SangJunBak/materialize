@@ -31,7 +31,8 @@ use mz_adapter::{
 };
 use mz_auth::Authenticated;
 use mz_auth::password::Password;
-use mz_authenticator::Authenticator;
+use mz_authenticator::{Authenticator, GenericOidcAuthenticator};
+use mz_frontegg_auth::Authenticator as FronteggAuthenticator;
 use mz_ore::cast::CastFrom;
 use mz_ore::netio::AsyncReady;
 use mz_ore::now::{EpochMillis, SYSTEM_TIME};
@@ -47,7 +48,7 @@ use mz_repr::{
     SqlRelationType, SqlScalarType,
 };
 use mz_server_core::TlsMode;
-use mz_server_core::listeners::AllowedRoles;
+use mz_server_core::listeners::{AllowedRoles, AuthenticatorKind};
 use mz_sql::ast::display::AstDisplay;
 use mz_sql::ast::{CopyDirection, CopyStatement, FetchDirection, Ident, Raw, Statement};
 use mz_sql::parse::StatementParseResult;
@@ -109,8 +110,13 @@ where
     pub version: i32,
     /// The parameters that the client provided in the startup message.
     pub params: BTreeMap<String, String>,
-    /// Authentication method to use. Frontegg, Password, or None.
-    pub authenticator: Authenticator,
+    /// Frontegg JWT authenticator.
+    pub frontegg: Option<FronteggAuthenticator>,
+    /// OIDC JWT authenticator.
+    pub oidc: Option<GenericOidcAuthenticator>,
+    /// The authentication method defined by the server's listener
+    /// configuration.
+    pub authenticator_kind: AuthenticatorKind,
     /// Global connection limit and count
     pub active_connection_counter: ConnectionCounter,
     /// Helm chart version
@@ -139,7 +145,9 @@ pub async fn run<'a, A, I>(
         conn_uuid,
         version,
         mut params,
-        authenticator,
+        frontegg,
+        oidc,
+        authenticator_kind,
         active_connection_counter,
         helm_chart_version,
         allowed_roles,
@@ -165,6 +173,13 @@ where
     // If oidc_auth_enabled exists as an option, return its value and filter it from
     // the remaining options.
     let (oidc_auth_enabled, options) = extract_oidc_auth_enabled_from_options(options);
+    let authenticator = get_authenticator(
+        authenticator_kind,
+        frontegg,
+        oidc,
+        adapter_client.clone(),
+        oidc_auth_enabled,
+    );
     // TODO move this somewhere it can be shared with HTTP
     let is_internal_user = INTERNAL_USER_NAMES.contains(&user);
     // this is a superset of internal users
@@ -229,64 +244,41 @@ where
                 }
             }
         }
-        Authenticator::Oidc {
-            oidc,
-            password: password_client,
-        } => {
-            if oidc_auth_enabled {
-                // OIDC authentication: JWT sent as password in cleartext flow
-                let jwt = match request_cleartext_password(conn).await {
-                    Ok(password) => password,
-                    Err(PasswordRequestError::IoError(e)) => return Err(e),
-                    Err(PasswordRequestError::InvalidPasswordError(e)) => {
-                        return conn.send(e).await;
-                    }
-                };
-                let auth_response = oidc.authenticate(&jwt, Some(&user)).await;
-                match auth_response {
-                    Ok((claims, authenticated)) => {
-                        let session = adapter_client.new_session(
-                            SessionConfig {
-                                conn_id: conn.conn_id().clone(),
-                                uuid: conn_uuid,
-                                user: claims.username().into(),
-                                client_ip: conn.peer_addr().clone(),
-                                external_metadata_rx: None,
-                                helm_chart_version,
-                            },
-                            authenticated,
-                        );
-                        // No invalidation of the auth session once authenticated,
-                        // so auth session lasts indefinitely.
-                        (session, pending().right_future())
-                    }
-                    Err(err) => {
-                        warn!(?err, "pgwire connection failed authentication");
-                        return conn
-                            .send(ErrorResponse::fatal(
-                                SqlState::INVALID_PASSWORD,
-                                "invalid password",
-                            ))
-                            .await;
-                    }
+        Authenticator::Oidc(oidc) => {
+            // OIDC authentication: JWT sent as password in cleartext flow
+            let jwt = match request_cleartext_password(conn).await {
+                Ok(password) => password,
+                Err(PasswordRequestError::IoError(e)) => return Err(e),
+                Err(PasswordRequestError::InvalidPasswordError(e)) => {
+                    return conn.send(e).await;
                 }
-            } else {
-                // Fallback to password authentication if oidc auth is not enabled
-                // through options.
-                match authenticate_with_password(
-                    conn,
-                    &password_client,
-                    user,
-                    conn_uuid,
-                    helm_chart_version,
-                )
-                .await
-                {
-                    Ok(session) => (session, pending().right_future()),
-                    Err(PasswordRequestError::IoError(e)) => return Err(e),
-                    Err(PasswordRequestError::InvalidPasswordError(e)) => {
-                        return conn.send(e).await;
-                    }
+            };
+            let auth_response = oidc.authenticate(&jwt, Some(&user)).await;
+            match auth_response {
+                Ok((claims, authenticated)) => {
+                    let session = adapter_client.new_session(
+                        SessionConfig {
+                            conn_id: conn.conn_id().clone(),
+                            uuid: conn_uuid,
+                            user: claims.username().into(),
+                            client_ip: conn.peer_addr().clone(),
+                            external_metadata_rx: None,
+                            helm_chart_version,
+                        },
+                        authenticated,
+                    );
+                    // No invalidation of the auth session once authenticated,
+                    // so auth session lasts indefinitely.
+                    (session, pending().right_future())
+                }
+                Err(err) => {
+                    warn!(?err, "pgwire connection failed authentication");
+                    return conn
+                        .send(ErrorResponse::fatal(
+                            SqlState::INVALID_PASSWORD,
+                            "invalid password",
+                        ))
+                        .await;
                 }
             }
         }
@@ -2919,6 +2911,36 @@ fn fetch_message(
     BackendMessage::CommandComplete { tag }
 }
 
+fn get_authenticator(
+    authenticator_kind: AuthenticatorKind,
+    frontegg: Option<FronteggAuthenticator>,
+    oidc: Option<GenericOidcAuthenticator>,
+    adapter_client: mz_adapter::Client,
+    // If oidc_auth_enabled exists as an option in the pgwire connection's
+    // `option` parameter
+    oidc_auth_option_enabled: bool,
+) -> Authenticator {
+    match authenticator_kind {
+        AuthenticatorKind::Frontegg => Authenticator::Frontegg(
+            frontegg.expect("Frontegg authenticator should exist with AuthenticatorKind::Frontegg"),
+        ),
+        AuthenticatorKind::Password => Authenticator::Password(adapter_client),
+        AuthenticatorKind::Sasl => Authenticator::Sasl(adapter_client),
+        AuthenticatorKind::Oidc => {
+            if oidc_auth_option_enabled {
+                let oidc =
+                    oidc.expect("OIDC authenticator should exist with AuthenticatorKind::Oidc");
+                Authenticator::Oidc(oidc)
+            } else {
+                // Fallback to password authentication if oidc auth is not enabled
+                // through options.
+                Authenticator::Password(adapter_client)
+            }
+        }
+        AuthenticatorKind::None => Authenticator::None,
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 enum ExecuteCount {
     All,
@@ -3118,86 +3140,6 @@ mod test {
         for test in tests {
             let got = split_options(test.input);
             assert_eq!(got, test.expect, "input: {}", test.input);
-        }
-    }
-
-    #[mz_ore::test]
-    fn test_extract_oidc_auth_enabled_from_options() {
-        struct TestCase {
-            input: Result<Vec<(&'static str, &'static str)>, ()>,
-            expect_enabled: bool,
-            expect_options: Result<Vec<(&'static str, &'static str)>, ()>,
-        }
-        let tests = vec![
-            // Empty options
-            TestCase {
-                input: Ok(vec![]),
-                expect_enabled: false,
-                expect_options: Ok(vec![]),
-            },
-            // Error input passthrough
-            TestCase {
-                input: Err(()),
-                expect_enabled: false,
-                expect_options: Err(()),
-            },
-            // oidc_auth_enabled=true
-            TestCase {
-                input: Ok(vec![("oidc_auth_enabled", "true")]),
-                expect_enabled: true,
-                expect_options: Ok(vec![]),
-            },
-            // oidc_auth_enabled=false
-            TestCase {
-                input: Ok(vec![("oidc_auth_enabled", "false")]),
-                expect_enabled: false,
-                expect_options: Ok(vec![]),
-            },
-            // Invalid oidc_auth_enabled value defaults to false
-            TestCase {
-                input: Ok(vec![("oidc_auth_enabled", "invalid")]),
-                expect_enabled: false,
-                expect_options: Ok(vec![]),
-            },
-            // No oidc_auth_enabled, other options preserved
-            TestCase {
-                input: Ok(vec![("key1", "val1"), ("key2", "val2")]),
-                expect_enabled: false,
-                expect_options: Ok(vec![("key1", "val1"), ("key2", "val2")]),
-            },
-            // Mixed: oidc_auth_enabled with other options
-            TestCase {
-                input: Ok(vec![
-                    ("key1", "val1"),
-                    ("oidc_auth_enabled", "true"),
-                    ("key2", "val2"),
-                ]),
-                expect_enabled: true,
-                expect_options: Ok(vec![("key1", "val1"), ("key2", "val2")]),
-            },
-        ];
-        for test in tests {
-            let input = test.input.map(|r| {
-                r.into_iter()
-                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                    .collect()
-            });
-            let (got_enabled, got_options) = extract_oidc_auth_enabled_from_options(input.clone());
-            let expect_options = test.expect_options.map(|r| {
-                r.into_iter()
-                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                    .collect()
-            });
-            assert_eq!(
-                got_enabled, test.expect_enabled,
-                "enabled mismatch for input: {:?}",
-                input
-            );
-            assert_eq!(
-                got_options, expect_options,
-                "options mismatch for input: {:?}",
-                input
-            );
         }
     }
 }

@@ -1039,7 +1039,7 @@ async fn auth(
         }
         // TODO (Oidc): Implement password auth flow
         // for this authenticator variant.
-        Authenticator::Oidc { oidc, password: _ } => match creds {
+        Authenticator::Oidc(oidc) => match creds {
             Some(Credentials::Token { token }) => {
                 // Validate JWT token
                 let (claims, authenticated) = oidc

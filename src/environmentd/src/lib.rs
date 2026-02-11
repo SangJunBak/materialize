@@ -104,9 +104,9 @@ pub struct Config {
     pub tls_reload_certs: ReloadTrigger,
     /// Password of the mz_system user.
     pub external_login_password_mz_system: Option<Password>,
-    /// Frontegg JWT authentication configuration.
+    /// Frontegg JWT authenticator.
     pub frontegg: Option<FronteggAuthenticator>,
-    /// OIDC JWT authentication configuration.
+    /// OIDC authenticator.
     pub oidc: Option<GenericOidcAuthenticator>,
     /// Origins for which cross-origin resource sharing (CORS) for HTTP requests
     /// is permitted.
@@ -277,25 +277,15 @@ impl Listener<SqlListenerConfig> {
                 TlsMode::Allow
             },
         });
-        let authenticator = match self.config.authenticator_kind {
-            AuthenticatorKind::Frontegg => Authenticator::Frontegg(
-                frontegg.expect("Frontegg args are required with AuthenticatorKind::Frontegg"),
-            ),
-            AuthenticatorKind::Password => Authenticator::Password(adapter_client.clone()),
-            AuthenticatorKind::Sasl => Authenticator::Sasl(adapter_client.clone()),
-            AuthenticatorKind::Oidc => Authenticator::Oidc {
-                oidc: oidc.expect("OIDC config is required with AuthenticatorKind::Oidc"),
-                password: adapter_client.clone(),
-            },
-            AuthenticatorKind::None => Authenticator::None,
-        };
 
         task::spawn(|| format!("{}_sql_server", label), {
             let sql_server = mz_pgwire::Server::new(mz_pgwire::Config {
                 label,
                 tls,
                 adapter_client,
-                authenticator,
+                authenticator_kind: self.config.authenticator_kind,
+                frontegg,
+                oidc,
                 metrics,
                 active_connection_counter,
                 helm_chart_version,
@@ -393,7 +383,7 @@ impl Listeners {
         let authenticator_none_rx = authenticator_none_rx.shared();
 
         // We can only send the Frontegg and None variants immediately.
-        // The Password and Oidc variants require an adapter client.
+        // The Password variant requires an adapter client.
         if let Some(frontegg) = &config.frontegg {
             authenticator_frontegg_tx
                 .send(Arc::new(Authenticator::Frontegg(frontegg.clone())))
@@ -822,10 +812,7 @@ impl Listeners {
             .expect("rx known to be live");
         if let Some(oidc) = &config.oidc {
             authenticator_oidc_tx
-                .send(Arc::new(Authenticator::Oidc {
-                    oidc: oidc.clone(),
-                    password: adapter_client.clone(),
-                }))
+                .send(Arc::new(Authenticator::Oidc(oidc.clone())))
                 .expect("rx known to be live");
         }
         adapter_client_tx
