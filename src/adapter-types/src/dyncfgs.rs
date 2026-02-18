@@ -120,7 +120,8 @@ pub const ENABLE_PASSWORD_AUTH: Config<bool> = Config::new(
 );
 
 /// OIDC issuer URL.
-pub const OIDC_ISSUER: Config<&'static str> = Config::new("oidc_issuer", "", "OIDC issuer URL.");
+pub const OIDC_ISSUER: Config<Option<&'static str>> =
+    Config::new("oidc_issuer", None, "OIDC issuer URL.");
 
 /// OIDC audience (client ID). When empty, audience validation is skipped.
 /// Validates that the JWT's `aud` claim contains this value.
@@ -128,9 +129,9 @@ pub const OIDC_ISSUER: Config<&'static str> = Config::new("oidc_issuer", "", "OI
 /// It is insecure to skip validation because it is the only
 /// mechanism preventing attackers from authenticating using a JWT
 /// issued by a dummy application, but from the same identity provider.
-pub const OIDC_AUDIENCE: Config<&'static str> = Config::new(
+pub const OIDC_AUDIENCE: Config<Option<&'static str>> = Config::new(
     "oidc_audience",
-    "",
+    None,
     "OIDC audience (client ID). When empty, audience validation is skipped.",
 );
 

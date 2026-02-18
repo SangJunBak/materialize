@@ -1350,7 +1350,7 @@ async fn test_auth_base_require_tls_oidc() {
 
     let server = test_util::TestHarness::default()
         .with_tls(server_cert, server_key)
-        .with_oidc_auth(oidc_server.issuer, None)
+        .with_oidc_auth(Some(oidc_server.issuer), None)
         .start()
         .await;
 
@@ -1549,7 +1549,10 @@ async fn test_auth_oidc_audience_validation() {
 
     let server = test_util::TestHarness::default()
         .with_tls(server_cert, server_key)
-        .with_oidc_auth(oidc_server.issuer, Some(expected_audience.to_string()))
+        .with_oidc_auth(
+            Some(oidc_server.issuer),
+            Some(expected_audience.to_string()),
+        )
         .start()
         .await;
 
@@ -1650,7 +1653,7 @@ async fn test_auth_oidc_audience_optional() {
 
     let server = test_util::TestHarness::default()
         .with_tls(server_cert, server_key)
-        .with_oidc_auth(oidc_server.issuer, None)
+        .with_oidc_auth(Some(oidc_server.issuer), None)
         .start()
         .await;
 
@@ -1707,7 +1710,7 @@ async fn test_auth_oidc_password_fallback() {
     let user_password = "secure_password";
 
     let server = test_util::TestHarness::default()
-        .with_oidc_auth(oidc_server.issuer, None)
+        .with_oidc_auth(Some(oidc_server.issuer), None)
         .with_system_parameter_default("enable_password_auth".to_string(), "true".to_string())
         .with_password_auth(Password("mz_system_password".to_owned()))
         .start()
@@ -1827,7 +1830,10 @@ async fn test_auth_oidc_config_switch() {
     // Start test server configured with first OIDC server
     let server = test_util::TestHarness::default()
         .with_tls(server_cert, server_key)
-        .with_oidc_auth(oidc_server1.issuer.clone(), Some(audience1.to_string()))
+        .with_oidc_auth(
+            Some(oidc_server1.issuer.clone()),
+            Some(audience1.to_string()),
+        )
         .start()
         .await;
 
@@ -1914,6 +1920,65 @@ async fn test_auth_oidc_config_switch() {
         client1_after.is_err(),
         "Should fail with first OIDC server after switch"
     );
+}
+
+/// This test verifies that we return an error when the OIDC issuer is not set.
+#[mz_ore::test(tokio::test(flavor = "multi_thread", worker_threads = 1))]
+#[cfg_attr(miri, ignore)]
+async fn test_auth_oidc_issuer_validation() {
+    let ca = Ca::new_root("test ca").unwrap();
+    let (server_cert, server_key) = ca
+        .request_cert("server", vec![IpAddr::V4(Ipv4Addr::LOCALHOST)])
+        .unwrap();
+
+    let encoding_key = String::from_utf8(ca.pkey.private_key_to_pem_pkcs8().unwrap()).unwrap();
+
+    let kid = "test-key-1".to_string();
+    let oidc_server = OidcMockServer::start(
+        None,
+        encoding_key,
+        kid,
+        SYSTEM_TIME.clone(),
+        i64::try_from(EXPIRES_IN_SECS).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let oidc_user = "user@example.com";
+
+    let token = oidc_server.generate_jwt(
+        oidc_user,
+        GenerateJwtOptions {
+            ..Default::default()
+        },
+    );
+
+    let server = test_util::TestHarness::default()
+        .with_tls(server_cert, server_key)
+        .with_oidc_auth(None, None)
+        .start()
+        .await;
+
+    run_tests(
+        "OIDC Issuer Validation",
+        &server,
+        &[
+            // JWT with no issuer should fail.
+            TestCase::Pgwire {
+                user_to_auth_as: oidc_user,
+                user_reported_by_system: oidc_user,
+                password: Some(Cow::Borrowed(&token)),
+                ssl_mode: SslMode::Require,
+                options: Some("--oidc_auth_enabled=true"),
+                configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
+                assert: Assert::DbErr(Box::new(|err| {
+                    assert_eq!(err.message(), "invalid password");
+                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                })),
+            },
+        ],
+    )
+    .await;
 }
 
 #[allow(clippy::unit_arg)]

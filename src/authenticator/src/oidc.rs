@@ -28,6 +28,8 @@ use url::Url;
 /// Errors that can occur during OIDC authentication.
 #[derive(Debug)]
 pub enum OidcError {
+    /// The issuer is missing.
+    MissingIssuer,
     /// Failed to parse OIDC configuration URL.
     InvalidIssuerUrl(url::ParseError),
     /// Failed to fetch OpenID configuration from provider.
@@ -47,6 +49,7 @@ pub enum OidcError {
 impl std::fmt::Display for OidcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            OidcError::MissingIssuer => write!(f, "missing OIDC issuer URL"),
             OidcError::InvalidIssuerUrl(e) => {
                 write!(f, "failed to parse OIDC issuer URL: {}", e)
             }
@@ -276,20 +279,21 @@ impl GenericOidcAuthenticatorInner {
     ) -> Result<OidcClaims, OidcError> {
         // Fetch current OIDC configuration from system variables
         let system_vars = self.adapter_client.get_system_vars().await;
-        let issuer = OIDC_ISSUER.get(system_vars.dyncfgs());
+        let Some(issuer) = OIDC_ISSUER.get(system_vars.dyncfgs()) else {
+            return Err(OidcError::MissingIssuer);
+        };
+
         let audience = {
             let aud = OIDC_AUDIENCE.get(system_vars.dyncfgs());
-            if aud.is_empty() {
+            if aud.is_none() {
                 warn!(
                     "Audience validation skipped. It is discouraged
                     to skip audience validation since it allows
                     anyone with a JWT issued by the same issuer
                     to authenticate."
                 );
-                None
-            } else {
-                Some(aud)
             }
+            aud
         };
 
         // Decode header to get key ID (kid) and algorithm

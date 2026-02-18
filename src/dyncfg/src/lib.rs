@@ -959,7 +959,10 @@ mod tests {
             OPT_STRING.parse_val("farragut"),
             Ok(ConfigVal::OptString(Some("farragut".to_string())))
         );
-        assert_eq!(OPT_STRING.parse_val(""), Ok(ConfigVal::OptString(None)));
+        assert_eq!(
+            OPT_STRING.parse_val(""),
+            Ok(ConfigVal::OptString(Some("".to_string())))
+        );
         assert_eq!(
             OPT_STRING.parse_val("5 s"),
             Ok(ConfigVal::OptString(Some("5 s".to_string())))
