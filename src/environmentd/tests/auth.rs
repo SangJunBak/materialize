@@ -992,8 +992,11 @@ async fn test_auth_base_require_tls_frontegg() {
                 options: None,
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(
+                        err.message(),
+                        "user in access token did not match the expected user"
+                    );
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             TestCase::Http {
@@ -1016,8 +1019,8 @@ async fn test_auth_base_require_tls_frontegg() {
                 options: None,
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "invalid app password format");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             TestCase::Http {
@@ -1040,8 +1043,8 @@ async fn test_auth_base_require_tls_frontegg() {
                 options: None,
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "invalid app password format");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             TestCase::Http {
@@ -1067,8 +1070,8 @@ async fn test_auth_base_require_tls_frontegg() {
                 options: None,
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "invalid app password format");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             TestCase::Http {
@@ -1169,8 +1172,11 @@ async fn test_auth_base_require_tls_frontegg() {
                 options: None,
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(
+                        err.message(),
+                        "user in access token did not match the expected user"
+                    );
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             // System user cannot login via external ports.
@@ -1439,8 +1445,8 @@ async fn test_auth_base_require_tls_oidc() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "failed to validate JWT");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             // Expired JWT should fail.
@@ -1452,8 +1458,8 @@ async fn test_auth_base_require_tls_oidc() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "authentication credentials have expired");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             // JWT for wrong user should fail.
@@ -1465,8 +1471,8 @@ async fn test_auth_base_require_tls_oidc() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "wrong user");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             // JWT with wrong issuer should fail.
@@ -1478,8 +1484,8 @@ async fn test_auth_base_require_tls_oidc() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "invalid issuer");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
         ],
@@ -1589,8 +1595,8 @@ async fn test_auth_oidc_audience_validation() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "invalid audience");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
             // JWT with no audience should fail when audience is required.
@@ -1602,8 +1608,8 @@ async fn test_auth_oidc_audience_validation() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "invalid audience");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
         ],
@@ -1972,8 +1978,8 @@ async fn test_auth_oidc_issuer_validation() {
                 options: Some("--oidc_auth_enabled=true"),
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::DbErr(Box::new(|err| {
-                    assert_eq!(err.message(), "invalid password");
-                    assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
+                    assert_eq!(err.message(), "missing OIDC issuer");
+                    assert_eq!(*err.code(), SqlState::INVALID_AUTHORIZATION_SPECIFICATION);
                 })),
             },
         ],
