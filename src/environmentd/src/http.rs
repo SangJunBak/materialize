@@ -112,7 +112,7 @@ pub struct HttpConfig {
     pub source: &'static str,
     pub tls: Option<ReloadingSslContext>,
     pub authenticator_kind: AuthenticatorKind,
-    pub frontegg_rx: Delayed<mz_frontegg_auth::Authenticator>,
+    pub frontegg: Option<mz_frontegg_auth::Authenticator>,
     pub oidc_rx: Delayed<mz_authenticator::GenericOidcAuthenticator>,
     pub adapter_client_rx: Shared<Receiver<Client>>,
     pub allowed_origin: AllowOrigin,
@@ -136,7 +136,7 @@ pub struct InternalRouteConfig {
 
 #[derive(Clone)]
 pub struct WsState {
-    frontegg_rx: Delayed<mz_frontegg_auth::Authenticator>,
+    frontegg: Option<mz_frontegg_auth::Authenticator>,
     oidc_rx: Delayed<mz_authenticator::GenericOidcAuthenticator>,
     authenticator_kind: AuthenticatorKind,
     adapter_client_rx: Delayed<mz_adapter::Client>,
@@ -163,7 +163,7 @@ impl HttpServer {
             source,
             tls,
             authenticator_kind,
-            frontegg_rx,
+            frontegg,
             oidc_rx,
             adapter_client_rx,
             allowed_origin,
@@ -190,11 +190,11 @@ impl HttpServer {
             .with_name("mz_session") // Custom cookie name
             .with_path("/"); // Set cookie path
 
-        let frontegg_middleware_rx = frontegg_rx.clone();
+        let frontegg_middleware = frontegg.clone();
         let oidc_middleware_rx = oidc_rx.clone();
         let adapter_client_middleware_rx = adapter_client_rx.clone();
         let auth_middleware = middleware::from_fn(move |req, next| {
-            let frontegg_rx = frontegg_middleware_rx.clone();
+            let frontegg = frontegg_middleware.clone();
             let oidc_rx = oidc_middleware_rx.clone();
             let adapter_client_rx = adapter_client_middleware_rx.clone();
             async move {
@@ -203,7 +203,7 @@ impl HttpServer {
                     next,
                     tls_enabled,
                     authenticator_kind,
-                    frontegg_rx,
+                    frontegg,
                     oidc_rx,
                     adapter_client_rx,
                     allowed_roles,
@@ -235,7 +235,7 @@ impl HttpServer {
             let mut ws_router = Router::new()
                 .route("/api/experimental/sql", routing::get(sql::handle_sql_ws))
                 .with_state(WsState {
-                    frontegg_rx: frontegg_rx.clone(),
+                    frontegg,
                     oidc_rx: oidc_rx.clone(),
                     authenticator_kind,
                     adapter_client_rx: adapter_client_rx.clone(),
@@ -828,7 +828,7 @@ async fn http_auth(
     next: Next,
     tls_enabled: bool,
     authenticator_kind: AuthenticatorKind,
-    frontegg_rx: Delayed<mz_frontegg_auth::Authenticator>,
+    frontegg: Option<mz_frontegg_auth::Authenticator>,
     oidc_rx: Delayed<mz_authenticator::GenericOidcAuthenticator>,
     adapter_client_rx: Delayed<Client>,
     allowed_roles: AllowedRoles,
@@ -907,7 +907,7 @@ async fn http_auth(
     let authenticator = get_authenticator(
         authenticator_kind,
         creds.as_ref(),
-        &frontegg_rx,
+        frontegg,
         &oidc_rx,
         &adapter_client_rx,
     )
@@ -931,14 +931,14 @@ async fn http_auth(
 
 async fn init_ws(
     WsState {
-        frontegg_rx,
+        frontegg,
         oidc_rx,
         authenticator_kind,
         adapter_client_rx,
         active_connection_counter,
         helm_chart_version,
         allowed_roles,
-    }: &WsState,
+    }: WsState,
     existing_user: Option<AuthedUser>,
     peer_addr: IpAddr,
     ws: &mut WebSocket,
@@ -993,14 +993,14 @@ async fn init_ws(
             }
         };
         let authenticator = get_authenticator(
-            *authenticator_kind,
+            authenticator_kind,
             Some(&creds),
-            frontegg_rx,
-            oidc_rx,
-            adapter_client_rx,
+            frontegg,
+            &oidc_rx,
+            &adapter_client_rx,
         )
         .await;
-        let user = auth(&authenticator, Some(creds), *allowed_roles, false).await?;
+        let user = auth(&authenticator, Some(creds), allowed_roles, false).await?;
         (user, options)
     };
 
@@ -1032,14 +1032,14 @@ enum Credentials {
 async fn get_authenticator(
     kind: AuthenticatorKind,
     creds: Option<&Credentials>,
-    frontegg_rx: &Delayed<mz_frontegg_auth::Authenticator>,
+    frontegg: Option<mz_frontegg_auth::Authenticator>,
     oidc_rx: &Delayed<mz_authenticator::GenericOidcAuthenticator>,
     adapter_client_rx: &Delayed<Client>,
 ) -> Authenticator {
     match kind {
-        AuthenticatorKind::Frontegg => {
-            Authenticator::Frontegg(frontegg_rx.clone().await.expect("sender not dropped"))
-        }
+        AuthenticatorKind::Frontegg => Authenticator::Frontegg(
+            frontegg.expect("Frontegg authenticator should exist with AuthenticatorKind::Frontegg"),
+        ),
         AuthenticatorKind::Password | AuthenticatorKind::Sasl => {
             let client = adapter_client_rx.clone().await.expect("sender not dropped");
             Authenticator::Password(client)

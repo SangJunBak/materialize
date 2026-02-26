@@ -1376,7 +1376,8 @@ async fn test_auth_base_require_tls_oidc() {
                 headers: &oidc_header_bearer,
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::Success,
-            }, // Ws with bearer token should succeed.
+            },
+            // Ws with bearer token should succeed.
             TestCase::Ws {
                 auth: &WebSocketAuth::Bearer {
                     token: jwt_token.clone(),
@@ -1765,7 +1766,7 @@ async fn test_auth_oidc_password_fallback() {
                     assert_eq!(*err.code(), SqlState::INVALID_PASSWORD);
                 })),
             },
-            // // HTTP with basic username/password should use password authentication
+            // HTTP with basic username/password should use password authentication
             TestCase::Http {
                 user_to_auth_as: oidc_user,
                 user_reported_by_system: oidc_user,
@@ -1774,7 +1775,7 @@ async fn test_auth_oidc_password_fallback() {
                 configure: Box::new(|b| Ok(b.set_verify(SslVerifyMode::NONE))),
                 assert: Assert::Success,
             },
-            // // Ws with basic username/password should use password authentication
+            // Ws with basic username/password should use password authentication
             TestCase::Ws {
                 auth: &WebSocketAuth::Basic {
                     user: oidc_user.to_string(),

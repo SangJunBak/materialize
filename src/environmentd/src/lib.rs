@@ -371,18 +371,8 @@ impl Listeners {
             internal_console_redirect_url: config.internal_console_redirect_url,
         });
 
-        let (authenticator_frontegg_tx, authenticator_frontegg_rx) = oneshot::channel();
-        let authenticator_frontegg_rx = authenticator_frontegg_rx.shared();
         let (authenticator_oidc_tx, authenticator_oidc_rx) = oneshot::channel();
         let authenticator_oidc_rx = authenticator_oidc_rx.shared();
-
-        // We can only send the Frontegg authenticator immediately.
-        // The OIDC authenticator requires an adapter client.
-        if let Some(frontegg) = &config.frontegg {
-            authenticator_frontegg_tx
-                .send(frontegg.clone())
-                .expect("rx known to be live");
-        }
         let (adapter_client_tx, adapter_client_rx) = oneshot::channel();
         let adapter_client_rx = adapter_client_rx.shared();
 
@@ -404,7 +394,7 @@ impl Listeners {
                 source,
                 tls,
                 authenticator_kind,
-                frontegg_rx: authenticator_frontegg_rx.clone(),
+                frontegg: config.frontegg.clone(),
                 oidc_rx: authenticator_oidc_rx.clone(),
                 allowed_origin: config.cors_allowed_origin.clone(),
                 concurrent_webhook_req: webhook_concurrency_limit.semaphore(),
